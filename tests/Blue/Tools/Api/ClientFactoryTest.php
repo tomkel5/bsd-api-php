@@ -2,6 +2,7 @@
 namespace Blue\Tools\Api;
 
 use GuzzleHttp\Client;
+use GuzzleHttp\Event\CompleteEvent;
 use GuzzleHttp\Event\Emitter;
 use GuzzleHttp\Event\ProgressEvent;
 use GuzzleHttp\Event\RequestEvents;
@@ -26,6 +27,54 @@ class ClientFactoryTest extends PHPUnit_Framework_TestCase {
             ]
         );
 
+        $client->getEmitter()->on(
+            'complete',
+            function(CompleteEvent $completeEvent) {
+
+
+                $response = $completeEvent->getResponse();
+
+                if ($response->getStatusCode() == 202) {
+
+                    $key = $response->getBody()->getContents();
+
+                    $attempts = 20;
+
+                    while($attempts > 0) {
+                        $deferredResponse = $completeEvent->getClient()->get(
+                            "https://tktest01.bsd.net/page/api/get_deferred_results",
+                            [
+                                'auth' => [
+                                    'all',
+                                    '97412986223e63438fa55748f07641140a5300fc',
+                                    'blue'
+                                ],
+                                'future' => false,
+                                'query' => [
+                                    'deferred_id' => $key
+                                ]
+                            ]
+                        );
+
+                        if ($deferredResponse->getStatusCode() != 202) {
+                            $response->setBody($deferredResponse->getBody());
+                            $response->setEffectiveUrl($deferredResponse->getEffectiveUrl());
+                            $response->setHeaders($deferredResponse->getHeaders());
+                            $response->setReasonPhrase($deferredResponse->getReasonPhrase());
+                            $response->setStatusCode($deferredResponse->getStatusCode());
+                        }
+
+                        sleep(5);
+                        $attempts--;
+                    }
+
+
+
+                }
+
+                $i = 0;
+            }
+        );
 
         $name = 'cons_group_' . time();
 
@@ -109,39 +158,7 @@ class ClientFactoryTest extends PHPUnit_Framework_TestCase {
 
         $deleteResponse->promise()->then(
             function(Response $response) use ($client) {
-                if ($response->getStatusCode() == 202) {
-
-                    $key = $response->getBody()->getContents();
-
-                    $attempts = 20;
-
-                    while($attempts > 0) {
-                        $deferredResponse = $client->get(
-                            "https://tktest01.bsd.net/page/api/get_deferred_results",
-                            [
-                                'auth' => [
-                                    'all',
-                                    '97412986223e63438fa55748f07641140a5300fc',
-                                    'blue'
-                                ],
-                                'future' => false,
-                                'query' => [
-                                    'deferred_id' => $key
-                                ]
-                            ]
-                        );
-
-                        if ($deferredResponse->getStatusCode() != 202) {
-                            return $deferredResponse;
-                        }
-
-                        sleep(5);
-                        $attempts++;
-                    }
-
-
-
-                }
+                $i = 0;
             }
         );
 

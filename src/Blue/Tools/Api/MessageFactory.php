@@ -68,7 +68,6 @@ class MessageFactory extends \GuzzleHttp\Message\MessageFactory {
 
         $query->set('api_mac', $hash);
 
-
         return $request;
     }
 
