@@ -1,6 +1,7 @@
 <?php
 namespace Blue\Tools\Api;
 
+use Blue\Tools\Api\Response\ToolsApiResponse;
 use GuzzleHttp\Message\FutureResponse;
 use GuzzleHttp\Message\Response;
 use GuzzleHttp\Message\ResponseInterface;
@@ -46,6 +47,9 @@ class Client
     /** @var int */
     private $deferredResultInterval = 5;
 
+    /** @var bool */
+    private $autoResolve = true;
+
     //--------------------
     // Other internals
     //--------------------
@@ -86,7 +90,6 @@ class Client
         );
     }
 
-
     /**
      * Execute a GET request against the API
      *
@@ -109,7 +112,11 @@ class Client
             ]
         );
 
-        return $this->resolve($response);
+        $toolsApiResponse = new ToolsApiResponse($response);
+
+        return ($this->autoResolve)
+            ? $this->resolveResponse($toolsApiResponse)
+            : $toolsApiResponse;
     }
 
 
@@ -138,54 +145,70 @@ class Client
             ]
         );
 
-        return $this->resolve($response);
+        $toolsApiResponse = new ToolsApiResponse($response);
+
+        return ($this->autoResolve)
+            ? $this->resolveResponse($toolsApiResponse)
+            : $toolsApiResponse;
     }
 
 
     /**
-     * @param ResponseInterface $response
+     * Resolve the response (if it was deferred)
+     *
+     * @param ToolsApiResponse $response
      * @return FutureResponse|Response|\GuzzleHttp\Message\ResponseInterface|\GuzzleHttp\Ring\Future\FutureInterface|null
      */
-    private function resolve(ResponseInterface $response)
-    {
+    public function resolveResponse(ToolsApiResponse $response) {
 
-        // An HTTP status of 202 indicates that this request was deferred
-        if ($response->getStatusCode() == 202) {
+        if ($response->isDeferred()) {
+            $key = $response->getDeferredKey();
 
-            $key = $response->getBody()->getContents();
-
-            $attempts = $this->deferredResultMaxAttempts;
-
-            while($attempts > 0) {
-                /** @var ResponseInterface $deferredResponse */
-                $deferredResponse = $this->guzzleClient->get(
-                    $this->baseUrl . "get_deferred_results",
-                    [
-                        'auth' => [
-                            $this->id,
-                            $this->secret,
-                            self::$AUTH_TYPE
-                        ],
-                        'future' => false,
-                        'query' => [
-                            'deferred_id' => $key
-                        ]
-                    ]
-                );
-
-                if ($deferredResponse->getStatusCode() != 202) {
-                    return $deferredResponse;
-                }
-
-                sleep($this->deferredResultInterval);
-                $attempts--;
+                return $this->resolveByDeferredKey($key);
             }
-
-            throw new RuntimeException("Could not load deferred response after {$this->deferredResultMaxAttempts} attempts");
-        }
 
         // If the request was not deferred, then return as-is
         return $response;
+    }
+
+    /**
+     * Resolve a response from a deferred key
+     *
+     * @param $key
+     * @return ToolsApiResponse
+     */
+    public function resolveByDeferredKey($key) {
+
+        $attempts = $this->deferredResultMaxAttempts;
+
+        while($attempts > 0) {
+            /** @var ResponseInterface $deferredResponse */
+            $deferredResponse = $this->guzzleClient->get(
+                $this->baseUrl . "get_deferred_results",
+                [
+                    'auth' => [
+                        $this->id,
+                        $this->secret,
+                        self::$AUTH_TYPE
+                    ],
+                    'future' => false,
+                    'query' => [
+                        'deferred_id' => $key
+                    ]
+                ]
+            );
+
+            $deferredToolsApiResponse = new ToolsApiResponse($deferredResponse);
+
+            if (!$deferredToolsApiResponse->isDeferred()) {
+                return $deferredToolsApiResponse;
+            }
+
+            sleep($this->deferredResultInterval);
+            $attempts--;
+        }
+
+        throw new RuntimeException("Could not load deferred response after {$this->deferredResultMaxAttempts} attempts");
     }
 
 
@@ -222,5 +245,15 @@ class Client
     public function setLogger(LoggerInterface $logger)
     {
         $this->logger = $logger;
+    }
+
+    /**
+     * Tells the client whether it should automatically resolve deferred responses
+     *
+     * @param bool $autoResolve
+     */
+    public function setAutoResolve($autoResolve)
+    {
+        $this->autoResolve = $autoResolve;
     }
 }
